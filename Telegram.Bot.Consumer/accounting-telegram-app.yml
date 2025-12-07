@@ -1,0 +1,80 @@
+trigger:
+- main   # Rama que dispara el pipeline (ajústalo a tu rama)
+
+pool:
+  name: 'Default'   # o el pool donde registraste tu agente
+
+variables:
+  buildConfiguration: 'Release'
+
+steps:
+# Paso 1: Usar .NET 8
+- task: UseDotNet@2
+  inputs:
+    packageType: 'sdk'
+    version: '8.0.x'
+    installationPath: $(Agent.ToolsDirectory)/dotnet
+
+# Paso 2: Restaurar dependencias
+- task: DotNetCoreCLI@2
+  inputs:
+    command: 'restore'
+    projects: '**/*.csproj'
+
+# Paso 3: Compilar
+- task: DotNetCoreCLI@2
+  inputs:
+    command: 'build'
+    projects: '**/*.csproj'
+    arguments: '--configuration $(buildConfiguration) --no-restore'
+
+# Paso 4: Publicar artefacto para un Web seervice de azure
+#- task: DotNetCoreCLI@2
+  #inputs:
+    #command: 'publish'
+    #publishWebProjects: true
+    #arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+
+# Paso 4: Publicar artefacto (sin zip)
+- task: DotNetCoreCLI@2
+  inputs:
+    command: 'publish'
+    projects: '**/*.csproj'
+    arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+    zipAfterPublish: false
+
+# Paso 5: Guardar artefacto para despliegue
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+
+# Paso 6: Desplegar a Azure App Service
+#- task: AzureRmWebAppDeployment@5
+ # displayName: 'Deploy'
+  #inputs:
+   #   ConnectionType: 'AzureRM'
+    #  azureSubscription: 'Azure for Students(6de4e792-2625-4a2a-88bf-784c5e65d4e8)'
+     # appType: 'webAppLinux'
+      #WebAppName: 'accountingmanager'
+      #packageForLinux: '$(Build.ArtifactStagingDirectory)/**/*.zip'
+
+# Paso 6: Copiar archivos al servidor Ubuntu
+- task: CopyFilesOverSSH@0
+  inputs:
+    sshEndpoint: 'MiUbuntuServer'  # Se configura en Project Settings > Service connections
+    sourceFolder: '$(Build.ArtifactStagingDirectory)'
+    contents: '**/*'
+    targetFolder: '/var/www/telegram-bot-consumer'  # Carpeta donde correrá tu app
+
+# Paso 7: Ejecutar comandos remotos en Ubuntu (reiniciar el servicio .NET)
+- task: SSH@0
+  inputs:
+    sshEndpoint: 'MiUbuntuServer'
+    runOptions: 'inline'
+    inline: |
+      echo "🚀 Reiniciando aplicación..."
+      sudo systemctl stop telegram-bot-consumer.service || true
+      sudo systemctl start telegram-bot-consumer.service
+      
